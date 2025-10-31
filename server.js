@@ -41,10 +41,10 @@ const COURSES_CONFIG = {
 
 // Inicjalizacja bazy
 await db.read();
-db.data ||= { 
-  courses: {},
-  groups: []
-};
+db.data = db.data || { courses: {}, groups: [] };
+if (!db.data.courses) db.data.courses = {};
+if (!db.data.groups) db.data.groups = [];
+await db.write();
 
 // Funkcja pobierająca dane z MailerLite
 async function fetchMailerLiteData() {
@@ -593,3 +593,4 @@ Utwórz plik **`.gitignore`** i wklej:
 node_modules/
 db.json
 .env
+
