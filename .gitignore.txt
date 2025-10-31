@@ -1,0 +1,3 @@
+echo node_modules/ > .gitignore
+echo db.json >> .gitignore
+echo .env >> .gitignore
