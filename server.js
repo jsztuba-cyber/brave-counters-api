@@ -107,6 +107,99 @@ app.use((req, res, next) => {
   next();
 });
 
+// ========== WIDGET ENDPOINT ==========
+app.get('/widget/:groupId', (req, res) => {
+  const { groupId } = req.params;
+  const { template = 'custom', customText = '', animate = 'true' } = req.query;
+  
+  const counter = db.data.courses[groupId];
+  
+  if (!counter) {
+    return res.send('<div style="color: red;">Nieznany licznik</div>');
+  }
+  
+  const count = counter.count;
+  const shouldAnimate = animate === 'true';
+  
+  // Funkcja do odmiany polskiej
+  function getPolishForm(number) {
+    if (number === 1) return 'osoba';
+    const lastDigit = number % 10;
+    const lastTwoDigits = number % 100;
+    
+    if (lastTwoDigits >= 11 && lastTwoDigits <= 19) return 'osób';
+    if (lastDigit >= 2 && lastDigit <= 4) return 'osoby';
+    return 'osób';
+  }
+  
+  const form = getPolishForm(count);
+  
+  let displayText = '';
+  
+  if (template === 'enrolled') {
+    displayText = `Już <strong>${count}</strong> ${form} ${count === 1 ? 'zapisana' : form === 'osoby' ? 'zapisane' : 'zapisanych'}!`;
+  } else if (template === 'waitlist') {
+    displayText = `<strong>${count}</strong> ${form} na liście oczekujących!`;
+  } else if (template === 'custom' && customText) {
+    displayText = customText.replace('{count}', `<strong>${count}</strong>`);
+  } else {
+    displayText = `<strong>${count}</strong>`;
+  }
+  
+  const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { 
+      margin: 0; 
+      padding: 8px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 16px;
+      line-height: 1.5;
+    }
+    .counter-widget {
+      display: inline;
+    }
+    .counter-widget strong {
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <span class="counter-widget" id="counter">${shouldAnimate ? '0' : displayText}</span>
+  ${shouldAnimate ? `
+  <script>
+    (function() {
+      const finalText = ${JSON.stringify(displayText)};
+      const targetCount = ${count};
+      const duration = 1000;
+      const counterEl = document.getElementById('counter');
+      
+      let currentCount = 0;
+      const increment = targetCount / (duration / 16);
+      
+      const timer = setInterval(() => {
+        currentCount += increment;
+        if (currentCount >= targetCount) {
+          counterEl.innerHTML = finalText;
+          clearInterval(timer);
+        } else {
+          const tempCount = Math.floor(currentCount);
+          counterEl.innerHTML = finalText.replace('<strong>' + targetCount + '</strong>', '<strong>' + tempCount + '</strong>');
+        }
+      }, 16);
+    })();
+  </script>
+  ` : ''}
+</body>
+</html>
+  `;
+  
+  res.send(html);
+});
+
 // ========== PANEL ADMINISTRACYJNY ==========
 
 app.get('/admin', (req, res) => {
@@ -115,6 +208,8 @@ app.get('/admin', (req, res) => {
     name: course.name,
     hasApiKey: !!course.apiKey
   }));
+  
+  const baseUrl = process.env.RENDER_EXTERNAL_URL || `http://localhost:${process.env.PORT || 3000}`;
   
   const html = `
 <!DOCTYPE html>
@@ -131,7 +226,7 @@ app.get('/admin', (req, res) => {
             padding: 20px;
         }
         .container {
-            max-width: 1000px;
+            max-width: 1200px;
             margin: 0 auto;
         }
         h1 {
@@ -164,18 +259,23 @@ app.get('/admin', (req, res) => {
             font-size: 14px;
             font-weight: 500;
         }
-        input, select {
+        input, select, textarea {
             width: 100%;
             padding: 10px 12px;
             border: 1px solid #ddd;
             border-radius: 6px;
             font-size: 14px;
+            font-family: inherit;
+        }
+        textarea {
+            min-height: 80px;
+            resize: vertical;
         }
         select {
             cursor: pointer;
             background: white;
         }
-        input:focus, select:focus {
+        input:focus, select:focus, textarea:focus {
             outline: none;
             border-color: #4A90E2;
         }
@@ -199,6 +299,15 @@ app.get('/admin', (req, res) => {
             background: #ccc;
             cursor: not-allowed;
         }
+        .btn-secondary {
+            background: #95A5A6;
+            color: white;
+            font-size: 12px;
+            padding: 6px 12px;
+        }
+        .btn-secondary:hover {
+            background: #7F8C8D;
+        }
         .btn-danger {
             background: #E74C3C;
             color: white;
@@ -220,14 +329,22 @@ app.get('/admin', (req, res) => {
             list-style: none;
         }
         .group-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 16px;
             border: 1px solid #e0e0e0;
             border-radius: 6px;
             margin-bottom: 10px;
             background: #fafafa;
+            overflow: hidden;
+        }
+        .group-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .group-header:hover {
+            background: #f0f0f0;
         }
         .group-info {
             flex: 1;
@@ -256,6 +373,57 @@ app.get('/admin', (req, res) => {
             font-weight: 700;
             color: #4A90E2;
             margin-right: 20px;
+        }
+        .group-actions {
+            display: flex;
+            gap: 8px;
+        }
+        .widget-section {
+            padding: 16px;
+            background: #f9f9f9;
+            border-top: 1px solid #e0e0e0;
+            display: none;
+        }
+        .widget-section.active {
+            display: block;
+        }
+        .widget-preview {
+            background: white;
+            border: 2px dashed #ddd;
+            border-radius: 6px;
+            padding: 20px;
+            margin: 16px 0;
+            text-align: center;
+            min-height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .code-box {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 16px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            overflow-x: auto;
+            position: relative;
+            margin-top: 12px;
+        }
+        .copy-btn {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: #4A90E2;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .copy-btn:hover {
+            background: #357ABD;
         }
         .empty-state {
             text-align: center;
@@ -291,6 +459,27 @@ app.get('/admin', (req, res) => {
             margin-bottom: 16px;
             border-radius: 4px;
         }
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        .checkbox-group input[type="checkbox"] {
+            width: auto;
+            margin: 0;
+        }
+        .widget-controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+        @media (max-width: 768px) {
+            .widget-controls {
+                grid-template-columns: 1fr;
+            }
+        }
     </style>
 </head>
 <body>
@@ -306,7 +495,7 @@ app.get('/admin', (req, res) => {
         </div>
 
         <div class="section">
-            <h2>➕ Dodaj nową grupę (webinar, kohortę, listę oczekujących)</h2>
+            <h2>➕ Dodaj nową grupę</h2>
             
             <div class="info-box">
                 <strong>💡 Jak to działa:</strong> Wybierasz kurs z listy (API key jest już skonfigurowany), 
@@ -320,30 +509,27 @@ app.get('/admin', (req, res) => {
                         <option value="">-- Wybierz kurs --</option>
                         ${coursesForSelect.map(course => `
                             <option value="${course.key}" ${!course.hasApiKey ? 'disabled' : ''}>
-                                ${course.name} ${!course.hasApiKey ? '(brak API key - skonfiguruj w Render)' : ''}
+                                ${course.name} ${!course.hasApiKey ? '(brak API key)' : ''}
                             </option>
                         `).join('')}
                     </select>
-                    <p class="help-text">Każdy kurs ma swoje osobne konto MailerLite</p>
                 </div>
                 
                 <div class="form-group">
-                    <label>Nazwa grupy (np. "Kohorta luty 2026", "Webinar 15.03", "Lista oczekujących")</label>
+                    <label>Nazwa grupy</label>
                     <input type="text" id="groupName" required placeholder="Kohorta luty 2026">
                 </div>
                 
                 <div class="form-group">
                     <label>ID grupy dla URL (automatycznie generowane)</label>
-                    <input type="text" id="groupId" required placeholder="ai_marketers_kohorta_luty_2026" readonly style="background: #f9f9f9;">
-                    <p class="help-text">Małe litery, podkreślniki, bez spacji - używane w URL API</p>
+                    <input type="text" id="groupId" required readonly style="background: #f9f9f9;">
                 </div>
                 
                 <div class="form-group">
-                    <label>MailerLite Group ID (liczba z URL grupy w MailerLite)</label>
+                    <label>MailerLite Group ID</label>
                     <input type="text" id="mlGroupId" required placeholder="123456789">
                     <p class="help-text">
-                        Zaloguj się do <strong>konta MailerLite tego kursu</strong> → 
-                        Subscribers → Groups → kliknij grupę → skopiuj liczbę z URL: /groups/<strong>123456789</strong>
+                        Znajdziesz w URL grupy w MailerLite: /groups/<strong>123456789</strong>
                     </p>
                 </div>
                 
@@ -352,7 +538,7 @@ app.get('/admin', (req, res) => {
         </div>
 
         <div class="section">
-            <h2>📊 Skonfigurowane grupy</h2>
+            <h2>📊 Skonfigurowane grupy i widżety</h2>
             <ul class="group-list" id="groupList">
                 <li class="empty-state">Ładowanie...</li>
             </ul>
@@ -360,6 +546,7 @@ app.get('/admin', (req, res) => {
     </div>
 
     <script>
+        const BASE_URL = '${baseUrl}';
         const COURSES = ${JSON.stringify(coursesForSelect)};
         
         const courseSelect = document.getElementById('courseSelect');
@@ -384,6 +571,43 @@ app.get('/admin', (req, res) => {
         courseSelect.addEventListener('change', generateGroupId);
         groupNameInput.addEventListener('input', generateGroupId);
 
+        function toggleWidget(groupId) {
+            const widget = document.getElementById('widget-' + groupId);
+            widget.classList.toggle('active');
+        }
+
+        function updateWidgetPreview(groupId) {
+            const template = document.getElementById('template-' + groupId).value;
+            const customText = document.getElementById('customText-' + groupId).value;
+            const animate = document.getElementById('animate-' + groupId).checked;
+            const preview = document.getElementById('preview-' + groupId);
+            const codeBox = document.getElementById('code-' + groupId);
+            
+            let url = BASE_URL + '/widget/' + groupId + '?template=' + template + '&animate=' + animate;
+            if (template === 'custom' && customText) {
+                url += '&customText=' + encodeURIComponent(customText);
+            }
+            
+            const embedCode = '<iframe src="' + url + '" width="100%" height="40" frameborder="0" scrolling="no" style="border: none; overflow: hidden;"></iframe>';
+            
+            preview.innerHTML = '<iframe src="' + url + '" width="100%" height="40" frameborder="0" scrolling="no" style="border: none;"></iframe>';
+            codeBox.querySelector('pre').textContent = embedCode;
+        }
+
+        function copyCode(groupId) {
+            const codeBox = document.getElementById('code-' + groupId);
+            const code = codeBox.querySelector('pre').textContent;
+            
+            navigator.clipboard.writeText(code).then(() => {
+                const btn = codeBox.querySelector('.copy-btn');
+                const originalText = btn.textContent;
+                btn.textContent = '✅ Skopiowano!';
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                }, 2000);
+            });
+        }
+
         async function loadGroups() {
             try {
                 const [groupsRes, countersRes] = await Promise.all([
@@ -403,12 +627,17 @@ app.get('/admin', (req, res) => {
                 
                 list.innerHTML = groups.map(group => {
                     const counter = counters[group.id];
-                    const count = counter ? counter.count : '—';
+                    const count = counter ? counter.count : 0;
                     const courseName = counter ? counter.courseName : 'Nieznany';
                     const lastUpdate = counter ? new Date(counter.lastUpdate).toLocaleString('pl-PL') : 'Nigdy';
                     
-                    return '<li class="group-item"><div class="group-info"><div class="group-name"><span class="course-badge">' + courseName + '</span>' + group.groupName + '</div><div class="group-details">ID: <code>' + group.id + '</code> | ML Group: <code>' + group.groupId + '</code> | Ostatnia aktualizacja: ' + lastUpdate + '</div></div><div class="group-count">' + (typeof count === 'number' ? count.toLocaleString('pl-PL') : count) + '</div><button class="btn btn-danger" onclick="deleteGroup(\\'' + group.id + '\\')">Usuń</button></li>';
+                    return '<li class="group-item"><div class="group-header" onclick="toggleWidget(\\'' + group.id + '\\')"><div class="group-info"><div class="group-name"><span class="course-badge">' + courseName + '</span>' + group.groupName + '</div><div class="group-details">ID: <code>' + group.id + '</code> | ML Group: <code>' + group.groupId + '</code> | Ostatnia aktualizacja: ' + lastUpdate + '</div></div><div class="group-count">' + count.toLocaleString('pl-PL') + '</div><div class="group-actions" onclick="event.stopPropagation()"><button class="btn btn-secondary" onclick="toggleWidget(\\'' + group.id + '\\')">📝 Widżet</button><button class="btn btn-danger" onclick="deleteGroup(\\'' + group.id + '\\')">Usuń</button></div></div><div class="widget-section" id="widget-' + group.id + '"><h3 style="margin-bottom: 16px;">Generator widżetu</h3><div class="widget-controls"><div class="form-group"><label>Szablon tekstu</label><select id="template-' + group.id + '" onchange="updateWidgetPreview(\\'' + group.id + '\\')"><option value="enrolled">Już X osób zapisanych!</option><option value="waitlist">X osób na liście oczekujących!</option><option value="custom">Własny tekst</option></select></div><div class="form-group"><label>Własny tekst (użyj {count} dla liczby)</label><textarea id="customText-' + group.id + '" placeholder="Np: Dołącz do {count} uczestników!" onchange="updateWidgetPreview(\\'' + group.id + '\\')"></textarea><p class="help-text">Liczba będzie automatycznie pogrubiona</p></div></div><div class="checkbox-group"><input type="checkbox" id="animate-' + group.id + '" checked onchange="updateWidgetPreview(\\'' + group.id + '\\')"><label for="animate-' + group.id + '" style="margin: 0;">Animuj licznik</label></div><h4 style="margin: 16px 0 8px 0;">Podgląd:</h4><div class="widget-preview" id="preview-' + group.id + '">Ładowanie...</div><h4 style="margin: 16px 0 8px 0;">Kod do wklejenia w Webflow:</h4><div class="code-box" id="code-' + group.id + '"><button class="copy-btn" onclick="copyCode(\\'' + group.id + '\\')">📋 Kopiuj</button><pre></pre></div><p class="help-text" style="margin-top: 12px;">💡 W Webflow: dodaj <strong>Embed</strong> element i wklej powyższy kod</p></div></li>';
                 }).join('');
+                
+                // Inicjalizuj podglądy
+                groups.forEach(group => {
+                    updateWidgetPreview(group.id);
+                });
             } catch (error) {
                 console.error('Błąd ładowania grup:', error);
             }
@@ -436,7 +665,7 @@ app.get('/admin', (req, res) => {
                 });
                 
                 if (res.ok) {
-                    alert('✅ Grupa dodana i licznik zaktualizowany!');
+                    alert('✅ Grupa dodana!');
                     e.target.reset();
                     loadGroups();
                 } else {
@@ -477,7 +706,7 @@ app.get('/admin', (req, res) => {
                     status.innerHTML = '';
                 }, 2000);
             } catch (error) {
-                status.innerHTML = '<span class="status" style="background:#FFE5E5;color:#E74C3C">❌ Błąd</span>';
+                status.innerHTML = '<span style="color: #E74C3C;">❌ Błąd</span>';
             }
         }
 
@@ -509,7 +738,7 @@ app.post('/api/groups', async (req, res) => {
   }
   
   if (!COURSES_CONFIG[courseKey].apiKey) {
-    return res.status(400).json({ error: 'Brak API key dla tego kursu - skonfiguruj w Render' });
+    return res.status(400).json({ error: 'Brak API key dla tego kursu' });
   }
   
   if (db.data.groups.find(g => g.id === id)) {
