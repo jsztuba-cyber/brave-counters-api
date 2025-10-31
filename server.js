@@ -11,7 +11,6 @@ const adapter = new JSONFile('db.json');
 const db = new Low(adapter, {});
 
 // ========== KONFIGURACJA KURSÓW ==========
-// Tu definiujesz wszystkie kursy z ich API keys
 const COURSES_CONFIG = {
   ai_marketers: {
     name: 'AI_marketers',
@@ -117,7 +116,7 @@ app.get('/admin', (req, res) => {
     hasApiKey: !!course.apiKey
   }));
   
-  res.send(`
+  const html = `
 <!DOCTYPE html>
 <html lang="pl">
 <head>
@@ -374,7 +373,7 @@ app.get('/admin', (req, res) => {
             if (courseKey && groupName) {
                 const slug = groupName
                     .toLowerCase()
-                    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                    .normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')
                     .replace(/[^a-z0-9]+/g, '_')
                     .replace(/^_+|_+$/g, '');
                 
@@ -408,23 +407,7 @@ app.get('/admin', (req, res) => {
                     const courseName = counter ? counter.courseName : 'Nieznany';
                     const lastUpdate = counter ? new Date(counter.lastUpdate).toLocaleString('pl-PL') : 'Nigdy';
                     
-                    return \`
-                        <li class="group-item">
-                            <div class="group-info">
-                                <div class="group-name">
-                                    <span class="course-badge">\${courseName}</span>
-                                    \${group.groupName}
-                                </div>
-                                <div class="group-details">
-                                    ID: <code>\${group.id}</code> | 
-                                    ML Group: <code>\${group.groupId}</code> |
-                                    Ostatnia aktualizacja: \${lastUpdate}
-                                </div>
-                            </div>
-                            <div class="group-count">\${typeof count === 'number' ? count.toLocaleString('pl-PL') : count}</div>
-                            <button class="btn btn-danger" onclick="deleteGroup('\${group.id}')">Usuń</button>
-                        </li>
-                    \`;
+                    return '<li class="group-item"><div class="group-info"><div class="group-name"><span class="course-badge">' + courseName + '</span>' + group.groupName + '</div><div class="group-details">ID: <code>' + group.id + '</code> | ML Group: <code>' + group.groupId + '</code> | Ostatnia aktualizacja: ' + lastUpdate + '</div></div><div class="group-count">' + (typeof count === 'number' ? count.toLocaleString('pl-PL') : count) + '</div><button class="btn btn-danger" onclick="deleteGroup(\\'' + group.id + '\\')">Usuń</button></li>';
                 }).join('');
             } catch (error) {
                 console.error('Błąd ładowania grup:', error);
@@ -469,10 +452,10 @@ app.get('/admin', (req, res) => {
         });
 
         async function deleteGroup(id) {
-            if (!confirm(\`Czy na pewno usunąć grupę "\${id}"?\`)) return;
+            if (!confirm('Czy na pewno usunąć grupę "' + id + '"?')) return;
             
             try {
-                const res = await fetch(\`/api/groups/\${id}\`, { method: 'DELETE' });
+                const res = await fetch('/api/groups/' + id, { method: 'DELETE' });
                 if (res.ok) {
                     alert('✅ Grupa usunięta!');
                     loadGroups();
@@ -503,7 +486,9 @@ app.get('/admin', (req, res) => {
     </script>
 </body>
 </html>
-  `);
+  `;
+  
+  res.send(html);
 });
 
 // ========== API ENDPOINTS ==========
@@ -580,17 +565,3 @@ app.listen(PORT, () => {
   console.log(`🚀 Serwer działa na porcie ${PORT}`);
   console.log(`📊 Panel admin: http://localhost:${PORT}/admin`);
 });
-```
-
-**Zapisz plik.**
-
----
-
-## 1.4 Utwórz plik `.gitignore`
-
-Utwórz plik **`.gitignore`** i wklej:
-```
-node_modules/
-db.json
-.env
-
