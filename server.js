@@ -2,12 +2,25 @@ import express from 'express';
 import cron from 'node-cron';
 import { Low } from 'lowdb';
 import { JSONFile } from 'lowdb/node';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+import { existsSync, mkdirSync } from 'fs';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-const adapter = new JSONFile('db.json');
+// Persistent storage path
+const DATA_DIR = process.env.DATA_DIR || join(__dirname, 'data');
+if (!existsSync(DATA_DIR)) {
+  mkdirSync(DATA_DIR, { recursive: true });
+}
+
+const DB_PATH = join(DATA_DIR, 'db.json');
+const adapter = new JSONFile(DB_PATH);
 const db = new Low(adapter, {});
 
 // ========== KONFIGURACJA KURSÓW ==========
@@ -40,10 +53,13 @@ const COURSES_CONFIG = {
 
 // Inicjalizacja bazy
 await db.read();
-db.data = db.data || { courses: {}, groups: [] };
+db.data = db.data || { courses: {}, groups: [], widgets: {} };
 if (!db.data.courses) db.data.courses = {};
 if (!db.data.groups) db.data.groups = [];
+if (!db.data.widgets) db.data.widgets = {};
 await db.write();
+
+console.log(`📁 Baza danych: ${DB_PATH}`);
 
 // Funkcja pobierająca dane z MailerLite
 async function fetchMailerLiteData() {
@@ -103,23 +119,17 @@ cron.schedule('*/10 * * * *', () => {
 // CORS
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, PUT');
   next();
 });
 
-// ========== WIDGET ENDPOINT ==========
-app.get('/widget/:groupId', (req, res) => {
-  const { groupId } = req.params;
-  const { template = 'custom', customText = '', animate = 'true' } = req.query;
+// ========== WIDGET JS SNIPPET ==========
+app.get('/counter.js', (req, res) => {
+  const baseUrl = process.env.RENDER_EXTERNAL_URL || `http://localhost:${process.env.PORT || 3000}`;
   
-  const counter = db.data.courses[groupId];
-  
-  if (!counter) {
-    return res.send('<div style="color: red;">Nieznany licznik</div>');
-  }
-  
-  const count = counter.count;
-  const shouldAnimate = animate === 'true';
+  const js = `
+(function() {
+  const API_URL = '${baseUrl}/api';
   
   // Funkcja do odmiany polskiej
   function getPolishForm(number) {
@@ -132,72 +142,89 @@ app.get('/widget/:groupId', (req, res) => {
     return 'osób';
   }
   
-  const form = getPolishForm(count);
-  
-  let displayText = '';
-  
-  if (template === 'enrolled') {
-    displayText = `Już <strong>${count}</strong> ${form} ${count === 1 ? 'zapisana' : form === 'osoby' ? 'zapisane' : 'zapisanych'}!`;
-  } else if (template === 'waitlist') {
-    displayText = `<strong>${count}</strong> ${form} na liście oczekujących!`;
-  } else if (template === 'custom' && customText) {
-    displayText = customText.replace('{count}', `<strong>${count}</strong>`);
-  } else {
-    displayText = `<strong>${count}</strong>`;
+  async function updateCounters() {
+    try {
+      const [countersRes, widgetsRes] = await Promise.all([
+        fetch(API_URL + '/counters'),
+        fetch(API_URL + '/widgets')
+      ]);
+      
+      const counters = await countersRes.json();
+      const widgets = await widgetsRes.json();
+      
+      document.querySelectorAll('[data-counter]').forEach(element => {
+        const counterId = element.getAttribute('data-counter');
+        const counter = counters[counterId];
+        
+        if (!counter) {
+          console.warn('Nie znaleziono licznika:', counterId);
+          return;
+        }
+        
+        const count = counter.count;
+        const widget = widgets[counterId] || {};
+        
+        // Pobierz konfigurację z atrybutów lub użyj domyślnych z widżetu
+        const template = element.getAttribute('data-template') || widget.template || 'custom';
+        const customText = element.getAttribute('data-text') || widget.customText || '';
+        const animate = element.getAttribute('data-animate') !== 'false' && (widget.animate !== false);
+        
+        let displayText = '';
+        const form = getPolishForm(count);
+        
+        if (template === 'enrolled') {
+          displayText = 'Już {count} ' + form + ' ' + (count === 1 ? 'zapisana' : form === 'osoby' ? 'zapisane' : 'zapisanych') + '!';
+        } else if (template === 'waitlist') {
+          displayText = '{count} ' + form + ' na liście oczekujących!';
+        } else if (customText) {
+          displayText = customText;
+        } else {
+          displayText = '{count}';
+        }
+        
+        // Zamień {count} na <strong>liczba</strong>
+        displayText = displayText.replace('{count}', '<strong>' + count + '</strong>');
+        
+        if (animate && !element.hasAttribute('data-animated')) {
+          element.setAttribute('data-animated', 'true');
+          animateCounter(element, count, displayText);
+        } else {
+          element.innerHTML = displayText;
+        }
+      });
+    } catch (error) {
+      console.error('Błąd pobierania liczników:', error);
+    }
   }
   
-  const html = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <style>
-    body { 
-      margin: 0; 
-      padding: 8px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      font-size: 16px;
-      line-height: 1.5;
-    }
-    .counter-widget {
-      display: inline;
-    }
-    .counter-widget strong {
-      font-weight: 700;
-    }
-  </style>
-</head>
-<body>
-  <span class="counter-widget" id="counter">${shouldAnimate ? '0' : displayText}</span>
-  ${shouldAnimate ? `
-  <script>
-    (function() {
-      const finalText = ${JSON.stringify(displayText)};
-      const targetCount = ${count};
-      const duration = 1000;
-      const counterEl = document.getElementById('counter');
-      
-      let currentCount = 0;
-      const increment = targetCount / (duration / 16);
-      
-      const timer = setInterval(() => {
-        currentCount += increment;
-        if (currentCount >= targetCount) {
-          counterEl.innerHTML = finalText;
-          clearInterval(timer);
-        } else {
-          const tempCount = Math.floor(currentCount);
-          counterEl.innerHTML = finalText.replace('<strong>' + targetCount + '</strong>', '<strong>' + tempCount + '</strong>');
-        }
-      }, 16);
-    })();
-  </script>
-  ` : ''}
-</body>
-</html>
+  function animateCounter(element, targetCount, finalText) {
+    const duration = 1000;
+    let currentCount = 0;
+    const increment = targetCount / (duration / 16);
+    
+    const timer = setInterval(() => {
+      currentCount += increment;
+      if (currentCount >= targetCount) {
+        element.innerHTML = finalText;
+        clearInterval(timer);
+      } else {
+        const tempCount = Math.floor(currentCount);
+        const tempText = finalText.replace('<strong>' + targetCount + '</strong>', '<strong>' + tempCount + '</strong>');
+        element.innerHTML = tempText;
+      }
+    }, 16);
+  }
+  
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', updateCounters);
+  } else {
+    updateCounters();
+  }
+})();
   `;
   
-  res.send(html);
+  res.setHeader('Content-Type', 'application/javascript');
+  res.send(js);
 });
 
 // ========== PANEL ADMINISTRACYJNY ==========
@@ -398,6 +425,10 @@ app.get('/admin', (req, res) => {
             display: flex;
             align-items: center;
             justify-content: center;
+            font-size: 16px;
+        }
+        .widget-preview strong {
+            font-weight: 700;
         }
         .code-box {
             background: #2d2d2d;
@@ -459,6 +490,13 @@ app.get('/admin', (req, res) => {
             margin-bottom: 16px;
             border-radius: 4px;
         }
+        .warning-box {
+            background: #FFF4E5;
+            border-left: 4px solid #FF9800;
+            padding: 12px;
+            margin-bottom: 16px;
+            border-radius: 4px;
+        }
         .checkbox-group {
             display: flex;
             align-items: center;
@@ -470,15 +508,7 @@ app.get('/admin', (req, res) => {
             margin: 0;
         }
         .widget-controls {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 16px;
             margin-bottom: 16px;
-        }
-        @media (max-width: 768px) {
-            .widget-controls {
-                grid-template-columns: 1fr;
-            }
         }
     </style>
 </head>
@@ -486,6 +516,20 @@ app.get('/admin', (req, res) => {
     <div class="container">
         <h1>🎓 BRAVE Counters</h1>
         <p class="subtitle">Panel zarządzania licznikami kursów i webinarów</p>
+
+        <div class="section">
+            <h2>📜 Instalacja w Webflow</h2>
+            <div class="info-box">
+                <strong>Krok 1:</strong> Dodaj ten kod do <strong>Project Settings → Custom Code → Footer Code</strong>
+            </div>
+            <div class="code-box">
+                <button class="copy-btn" onclick="copyInstallCode()">📋 Kopiuj</button>
+                <pre id="installCode">&lt;script src="${baseUrl}/counter.js"&gt;&lt;/script&gt;</pre>
+            </div>
+            <p class="help-text" style="margin-top: 12px;">
+                ⚠️ To wystarczy zrobić <strong>raz na cały projekt</strong> - potem możesz dodawać dowolną ilość liczników
+            </p>
+        </div>
 
         <div class="section">
             <button class="btn btn-refresh" onclick="refreshCounters()">
@@ -496,11 +540,6 @@ app.get('/admin', (req, res) => {
 
         <div class="section">
             <h2>➕ Dodaj nową grupę</h2>
-            
-            <div class="info-box">
-                <strong>💡 Jak to działa:</strong> Wybierasz kurs z listy (API key jest już skonfigurowany), 
-                podajesz nazwę grupy i Group ID z MailerLite - i gotowe!
-            </div>
             
             <form id="addGroupForm">
                 <div class="form-group">
@@ -571,27 +610,68 @@ app.get('/admin', (req, res) => {
         courseSelect.addEventListener('change', generateGroupId);
         groupNameInput.addEventListener('input', generateGroupId);
 
+        function copyInstallCode() {
+            const code = document.getElementById('installCode').textContent;
+            navigator.clipboard.writeText(code).then(() => {
+                alert('✅ Skopiowano! Wklej kod w Webflow → Project Settings → Custom Code → Footer');
+            });
+        }
+
         function toggleWidget(groupId) {
             const widget = document.getElementById('widget-' + groupId);
             widget.classList.toggle('active');
         }
 
-        function updateWidgetPreview(groupId) {
+        function getPolishForm(number) {
+            if (number === 1) return 'osoba';
+            const lastDigit = number % 10;
+            const lastTwoDigits = number % 100;
+            
+            if (lastTwoDigits >= 11 && lastTwoDigits <= 19) return 'osób';
+            if (lastDigit >= 2 && lastDigit <= 4) return 'osoby';
+            return 'osób';
+        }
+
+        function updateWidgetPreview(groupId, count) {
             const template = document.getElementById('template-' + groupId).value;
             const customText = document.getElementById('customText-' + groupId).value;
             const animate = document.getElementById('animate-' + groupId).checked;
             const preview = document.getElementById('preview-' + groupId);
             const codeBox = document.getElementById('code-' + groupId);
+            const codeStep2 = document.getElementById('codeStep2-' + groupId);
             
-            let url = BASE_URL + '/widget/' + groupId + '?template=' + template + '&animate=' + animate;
-            if (template === 'custom' && customText) {
-                url += '&customText=' + encodeURIComponent(customText);
+            let displayText = '';
+            const form = getPolishForm(count);
+            
+            if (template === 'enrolled') {
+                displayText = 'Już <strong>' + count + '</strong> ' + form + ' ' + (count === 1 ? 'zapisana' : form === 'osoby' ? 'zapisane' : 'zapisanych') + '!';
+            } else if (template === 'waitlist') {
+                displayText = '<strong>' + count + '</strong> ' + form + ' na liście oczekujących!';
+            } else if (customText) {
+                displayText = customText.replace('{count}', '<strong>' + count + '</strong>');
+            } else {
+                displayText = '<strong>' + count + '</strong>';
             }
             
-            const embedCode = '<iframe src="' + url + '" width="100%" height="40" frameborder="0" scrolling="no" style="border: none; overflow: hidden;"></iframe>';
+            preview.innerHTML = displayText;
             
-            preview.innerHTML = '<iframe src="' + url + '" width="100%" height="40" frameborder="0" scrolling="no" style="border: none;"></iframe>';
+            // Generuj kod HTML
+            let attributes = 'data-counter="' + groupId + '"';
+            if (template !== 'custom' || !customText) {
+                attributes += ' data-template="' + template + '"';
+            }
+            if (customText && template === 'custom') {
+                attributes += ' data-text="' + customText.replace(/"/g, '&quot;') + '"';
+            }
+            if (!animate) {
+                attributes += ' data-animate="false"';
+            }
+            
+            const embedCode = '&lt;div ' + attributes + '&gt;0&lt;/div&gt;';
             codeBox.querySelector('pre').textContent = embedCode;
+            
+            // Krok 2 - zapisz konfigurację
+            codeStep2.style.display = 'block';
         }
 
         function copyCode(groupId) {
@@ -608,15 +688,37 @@ app.get('/admin', (req, res) => {
             });
         }
 
+        async function saveWidget(groupId) {
+            const template = document.getElementById('template-' + groupId).value;
+            const customText = document.getElementById('customText-' + groupId).value;
+            const animate = document.getElementById('animate-' + groupId).checked;
+            
+            try {
+                const res = await fetch('/api/widgets/' + groupId, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ template, customText, animate })
+                });
+                
+                if (res.ok) {
+                    alert('✅ Konfiguracja zapisana!');
+                }
+            } catch (error) {
+                alert('❌ Błąd zapisu: ' + error.message);
+            }
+        }
+
         async function loadGroups() {
             try {
-                const [groupsRes, countersRes] = await Promise.all([
+                const [groupsRes, countersRes, widgetsRes] = await Promise.all([
                     fetch('/api/groups'),
-                    fetch('/api/counters')
+                    fetch('/api/counters'),
+                    fetch('/api/widgets')
                 ]);
                 
                 const groups = await groupsRes.json();
                 const counters = await countersRes.json();
+                const widgets = await widgetsRes.json();
                 
                 const list = document.getElementById('groupList');
                 
@@ -627,16 +729,19 @@ app.get('/admin', (req, res) => {
                 
                 list.innerHTML = groups.map(group => {
                     const counter = counters[group.id];
+                    const widget = widgets[group.id] || { template: 'custom', customText: '', animate: true };
                     const count = counter ? counter.count : 0;
                     const courseName = counter ? counter.courseName : 'Nieznany';
                     const lastUpdate = counter ? new Date(counter.lastUpdate).toLocaleString('pl-PL') : 'Nigdy';
                     
-                    return '<li class="group-item"><div class="group-header" onclick="toggleWidget(\\'' + group.id + '\\')"><div class="group-info"><div class="group-name"><span class="course-badge">' + courseName + '</span>' + group.groupName + '</div><div class="group-details">ID: <code>' + group.id + '</code> | ML Group: <code>' + group.groupId + '</code> | Ostatnia aktualizacja: ' + lastUpdate + '</div></div><div class="group-count">' + count.toLocaleString('pl-PL') + '</div><div class="group-actions" onclick="event.stopPropagation()"><button class="btn btn-secondary" onclick="toggleWidget(\\'' + group.id + '\\')">📝 Widżet</button><button class="btn btn-danger" onclick="deleteGroup(\\'' + group.id + '\\')">Usuń</button></div></div><div class="widget-section" id="widget-' + group.id + '"><h3 style="margin-bottom: 16px;">Generator widżetu</h3><div class="widget-controls"><div class="form-group"><label>Szablon tekstu</label><select id="template-' + group.id + '" onchange="updateWidgetPreview(\\'' + group.id + '\\')"><option value="enrolled">Już X osób zapisanych!</option><option value="waitlist">X osób na liście oczekujących!</option><option value="custom">Własny tekst</option></select></div><div class="form-group"><label>Własny tekst (użyj {count} dla liczby)</label><textarea id="customText-' + group.id + '" placeholder="Np: Dołącz do {count} uczestników!" onchange="updateWidgetPreview(\\'' + group.id + '\\')"></textarea><p class="help-text">Liczba będzie automatycznie pogrubiona</p></div></div><div class="checkbox-group"><input type="checkbox" id="animate-' + group.id + '" checked onchange="updateWidgetPreview(\\'' + group.id + '\\')"><label for="animate-' + group.id + '" style="margin: 0;">Animuj licznik</label></div><h4 style="margin: 16px 0 8px 0;">Podgląd:</h4><div class="widget-preview" id="preview-' + group.id + '">Ładowanie...</div><h4 style="margin: 16px 0 8px 0;">Kod do wklejenia w Webflow:</h4><div class="code-box" id="code-' + group.id + '"><button class="copy-btn" onclick="copyCode(\\'' + group.id + '\\')">📋 Kopiuj</button><pre></pre></div><p class="help-text" style="margin-top: 12px;">💡 W Webflow: dodaj <strong>Embed</strong> element i wklej powyższy kod</p></div></li>';
+                    return '<li class="group-item"><div class="group-header" onclick="toggleWidget(\\'' + group.id + '\\')"><div class="group-info"><div class="group-name"><span class="course-badge">' + courseName + '</span>' + group.groupName + '</div><div class="group-details">ID: <code>' + group.id + '</code> | ML Group: <code>' + group.groupId + '</code> | Ostatnia aktualizacja: ' + lastUpdate + '</div></div><div class="group-count">' + count.toLocaleString('pl-PL') + '</div><div class="group-actions" onclick="event.stopPropagation()"><button class="btn btn-secondary" onclick="toggleWidget(\\'' + group.id + '\\')">🎨 Widżet</button><button class="btn btn-danger" onclick="deleteGroup(\\'' + group.id + '\\')">Usuń</button></div></div><div class="widget-section" id="widget-' + group.id + '"><h3 style="margin-bottom: 16px;">Generator widżetu dla Webflow</h3><div class="info-box"><strong>Krok 1:</strong> Skonfiguruj wygląd licznika poniżej</div><div class="widget-controls"><div class="form-group"><label>Szablon tekstu</label><select id="template-' + group.id + '" onchange="updateWidgetPreview(\\'' + group.id + '\\', ' + count + ')"><option value="enrolled" ' + (widget.template === 'enrolled' ? 'selected' : '') + '>Już X osób zapisanych!</option><option value="waitlist" ' + (widget.template === 'waitlist' ? 'selected' : '') + '>X osób na liście oczekujących!</option><option value="custom" ' + (widget.template === 'custom' ? 'selected' : '') + '>Własny tekst</option></select></div><div class="form-group"><label>Własny tekst (użyj {count} dla liczby)</label><textarea id="customText-' + group.id + '" placeholder="Np: Dołącz do {count} uczestników!" onchange="updateWidgetPreview(\\'' + group.id + '\\', ' + count + ')">' + (widget.customText || '') + '</textarea><p class="help-text">Liczba będzie automatycznie pogrubiona</p></div><div class="checkbox-group"><input type="checkbox" id="animate-' + group.id + '" ' + (widget.animate !== false ? 'checked' : '') + ' onchange="updateWidgetPreview(\\'' + group.id + '\\', ' + count + ')"><label for="animate-' + group.id + '" style="margin: 0;">Animuj licznik</label></div></div><h4 style="margin: 16px 0 8px 0;">Podgląd:</h4><div class="widget-preview" id="preview-' + group.id + '">Ładowanie...</div><div class="warning-box" id="codeStep2-' + group.id + '" style="display:none;"><strong>Krok 2:</strong> Zapisz konfigurację (żeby działała automatycznie po odświeżeniu)<br><button class="btn btn-primary" style="margin-top: 8px;" onclick="saveWidget(\\'' + group.id + '\\')">💾 Zapisz konfigurację</button></div><div class="info-box"><strong>Krok 3:</strong> W Webflow dodaj element (Div/Paragraph) i skopiuj ten kod do <strong>Custom Attributes</strong></div><div class="code-box" id="code-' + group.id + '"><button class="copy-btn" onclick="copyCode(\\'' + group.id + '\\')">📋 Kopiuj</button><pre></pre></div><p class="help-text" style="margin-top: 12px;">💡 Możesz stylować tekst normalnie w Webflow - <strong>liczba będzie pogrubiona</strong></p></div></li>';
                 }).join('');
                 
                 // Inicjalizuj podglądy
                 groups.forEach(group => {
-                    updateWidgetPreview(group.id);
+                    const counter = counters[group.id];
+                    const count = counter ? counter.count : 0;
+                    updateWidgetPreview(group.id, count);
                 });
             } catch (error) {
                 console.error('Błąd ładowania grup:', error);
@@ -726,6 +831,20 @@ app.get('/api/groups', (req, res) => {
   res.json(db.data.groups);
 });
 
+app.get('/api/widgets', (req, res) => {
+  res.json(db.data.widgets);
+});
+
+app.put('/api/widgets/:id', async (req, res) => {
+  const { id } = req.params;
+  const { template, customText, animate } = req.body;
+  
+  db.data.widgets[id] = { template, customText, animate };
+  await db.write();
+  
+  res.json({ success: true });
+});
+
 app.post('/api/groups', async (req, res) => {
   const { courseKey, groupName, id, groupId } = req.body;
   
@@ -756,6 +875,7 @@ app.post('/api/groups', async (req, res) => {
 app.delete('/api/groups/:id', async (req, res) => {
   db.data.groups = db.data.groups.filter(g => g.id !== req.params.id);
   delete db.data.courses[req.params.id];
+  delete db.data.widgets[req.params.id];
   await db.write();
   res.json({ success: true });
 });
