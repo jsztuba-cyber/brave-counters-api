@@ -111,8 +111,9 @@ async function fetchMailerLiteData() {
   console.log('✅ Aktualizacja zakończona');
 }
 
-// Cron job - aktualizacja co 10 minut
-cron.schedule('*/10 * * * *', () => {
+// Cron job - aktualizacja CO GODZINĘ o pełnej godzinie (0 minut)
+cron.schedule('0 * * * *', () => {
+  console.log('⏰ Automatyczna aktualizacja o pełnej godzinie');
   fetchMailerLiteData();
 });
 
@@ -215,11 +216,15 @@ app.get('/counter.js', (req, res) => {
     }, 16);
   }
   
+  // Ładuj natychmiast, bez czekania na DOMContentLoaded
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', updateCounters);
   } else {
     updateCounters();
   }
+  
+  // Auto-refresh co godzinę (synchronizacja z serwerem)
+  setInterval(updateCounters, 3600000); // 3600000ms = 1 godzina
 })();
   `;
   
@@ -248,72 +253,107 @@ app.get('/admin', (req, res) => {
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: #f5f5f5;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            background: #0a0a0a;
+            color: #e0e0e0;
             padding: 20px;
+            line-height: 1.6;
+        }
+        .header {
+            max-width: 1200px;
+            margin: 0 auto 40px;
+            text-align: center;
+        }
+        .logo {
+            max-width: 180px;
+            height: auto;
+            margin-bottom: 30px;
         }
         .container {
             max-width: 1200px;
             margin: 0 auto;
         }
         h1 {
-            color: #333;
+            color: #ffffff;
             margin-bottom: 10px;
+            font-size: 32px;
+            font-weight: 700;
         }
         .subtitle {
-            color: #666;
+            color: #999;
             margin-bottom: 30px;
+            font-size: 16px;
         }
         .section {
-            background: white;
-            border-radius: 8px;
-            padding: 24px;
-            margin-bottom: 20px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            background: #1a1a1a;
+            border-radius: 12px;
+            padding: 28px;
+            margin-bottom: 24px;
+            border: 1px solid #2a2a2a;
         }
         h2 {
-            color: #333;
-            margin-bottom: 16px;
+            color: #ffffff;
+            margin-bottom: 20px;
+            font-size: 20px;
+            font-weight: 600;
+        }
+        h3 {
+            color: #ffffff;
             font-size: 18px;
+            font-weight: 600;
+        }
+        h4 {
+            color: #cccccc;
+            font-size: 14px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
         .form-group {
-            margin-bottom: 16px;
+            margin-bottom: 20px;
         }
         label {
             display: block;
-            margin-bottom: 6px;
-            color: #555;
+            margin-bottom: 8px;
+            color: #ccc;
             font-size: 14px;
             font-weight: 500;
         }
         input, select, textarea {
             width: 100%;
-            padding: 10px 12px;
-            border: 1px solid #ddd;
-            border-radius: 6px;
+            padding: 12px 16px;
+            border: 1px solid #333;
+            border-radius: 8px;
             font-size: 14px;
             font-family: inherit;
+            background: #0f0f0f;
+            color: #e0e0e0;
+            transition: border-color 0.2s;
         }
         textarea {
-            min-height: 80px;
+            min-height: 100px;
             resize: vertical;
         }
         select {
             cursor: pointer;
-            background: white;
         }
         input:focus, select:focus, textarea:focus {
             outline: none;
             border-color: #4A90E2;
         }
+        input[readonly] {
+            background: #151515;
+            color: #888;
+        }
         .btn {
-            padding: 10px 20px;
+            padding: 12px 24px;
             border: none;
-            border-radius: 6px;
+            border-radius: 8px;
             font-size: 14px;
-            font-weight: 500;
+            font-weight: 600;
             cursor: pointer;
             transition: all 0.2s;
+            display: inline-block;
         }
         .btn-primary {
             background: #4A90E2;
@@ -321,25 +361,27 @@ app.get('/admin', (req, res) => {
         }
         .btn-primary:hover {
             background: #357ABD;
+            transform: translateY(-1px);
         }
         .btn-primary:disabled {
-            background: #ccc;
+            background: #333;
             cursor: not-allowed;
+            transform: none;
         }
         .btn-secondary {
-            background: #95A5A6;
-            color: white;
-            font-size: 12px;
-            padding: 6px 12px;
+            background: #2a2a2a;
+            color: #e0e0e0;
+            font-size: 13px;
+            padding: 8px 16px;
         }
         .btn-secondary:hover {
-            background: #7F8C8D;
+            background: #333;
         }
         .btn-danger {
             background: #E74C3C;
             color: white;
-            padding: 6px 12px;
-            font-size: 12px;
+            padding: 8px 16px;
+            font-size: 13px;
         }
         .btn-danger:hover {
             background: #C0392B;
@@ -347,7 +389,7 @@ app.get('/admin', (req, res) => {
         .btn-refresh {
             background: #27AE60;
             color: white;
-            margin-bottom: 20px;
+            margin-right: 12px;
         }
         .btn-refresh:hover {
             background: #229954;
@@ -356,22 +398,26 @@ app.get('/admin', (req, res) => {
             list-style: none;
         }
         .group-item {
-            border: 1px solid #e0e0e0;
-            border-radius: 6px;
-            margin-bottom: 10px;
-            background: #fafafa;
+            border: 1px solid #2a2a2a;
+            border-radius: 12px;
+            margin-bottom: 16px;
+            background: #151515;
             overflow: hidden;
+            transition: border-color 0.2s;
+        }
+        .group-item:hover {
+            border-color: #333;
         }
         .group-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 16px;
+            padding: 20px;
             cursor: pointer;
             user-select: none;
         }
         .group-header:hover {
-            background: #f0f0f0;
+            background: #1a1a1a;
         }
         .group-info {
             flex: 1;
@@ -380,143 +426,185 @@ app.get('/admin', (req, res) => {
             display: inline-block;
             background: #4A90E2;
             color: white;
-            padding: 2px 8px;
-            border-radius: 4px;
+            padding: 4px 12px;
+            border-radius: 6px;
             font-size: 11px;
-            font-weight: 600;
-            margin-right: 8px;
+            font-weight: 700;
+            margin-right: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
         .group-name {
             font-weight: 600;
-            color: #333;
-            margin-bottom: 4px;
+            color: #ffffff;
+            margin-bottom: 6px;
+            font-size: 16px;
         }
         .group-details {
             font-size: 13px;
-            color: #777;
+            color: #888;
         }
         .group-count {
-            font-size: 24px;
+            font-size: 32px;
             font-weight: 700;
             color: #4A90E2;
-            margin-right: 20px;
+            margin-right: 24px;
         }
         .group-actions {
             display: flex;
-            gap: 8px;
+            gap: 10px;
         }
         .widget-section {
-            padding: 16px;
-            background: #f9f9f9;
-            border-top: 1px solid #e0e0e0;
+            padding: 24px;
+            background: #0f0f0f;
+            border-top: 1px solid #2a2a2a;
             display: none;
         }
         .widget-section.active {
             display: block;
         }
         .widget-preview {
-            background: white;
-            border: 2px dashed #ddd;
-            border-radius: 6px;
-            padding: 20px;
-            margin: 16px 0;
+            background: #1a1a1a;
+            border: 2px dashed #333;
+            border-radius: 8px;
+            padding: 24px;
+            margin: 20px 0;
             text-align: center;
-            min-height: 60px;
+            min-height: 70px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 16px;
+            font-size: 18px;
+            color: #e0e0e0;
         }
         .widget-preview strong {
             font-weight: 700;
+            color: #4A90E2;
         }
         .code-box {
-            background: #2d2d2d;
-            color: #f8f8f2;
-            padding: 16px;
-            border-radius: 6px;
-            font-family: 'Courier New', monospace;
+            background: #0a0a0a;
+            color: #e0e0e0;
+            padding: 20px;
+            border-radius: 8px;
+            font-family: 'Monaco', 'Courier New', monospace;
             font-size: 13px;
             overflow-x: auto;
             position: relative;
-            margin-top: 12px;
+            margin-top: 16px;
+            border: 1px solid #2a2a2a;
+        }
+        .code-box pre {
+            margin: 0;
+            white-space: pre-wrap;
+            word-break: break-all;
         }
         .copy-btn {
             position: absolute;
-            top: 8px;
-            right: 8px;
+            top: 12px;
+            right: 12px;
             background: #4A90E2;
             color: white;
             border: none;
-            padding: 6px 12px;
-            border-radius: 4px;
+            padding: 8px 16px;
+            border-radius: 6px;
             cursor: pointer;
             font-size: 12px;
+            font-weight: 600;
         }
         .copy-btn:hover {
             background: #357ABD;
         }
         .empty-state {
             text-align: center;
-            padding: 40px;
-            color: #999;
+            padding: 60px 20px;
+            color: #666;
+            font-size: 16px;
         }
         .help-text {
             font-size: 13px;
-            color: #777;
-            margin-top: 6px;
+            color: #888;
+            margin-top: 8px;
+            line-height: 1.5;
         }
         .status {
             display: inline-block;
-            padding: 4px 10px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 500;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
         }
         .status-success {
-            background: #D5F4E6;
+            background: rgba(39, 174, 96, 0.2);
             color: #27AE60;
         }
         code {
-            background: #f0f0f0;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-size: 12px;
+            background: #2a2a2a;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 13px;
+            color: #4A90E2;
+            font-family: 'Monaco', 'Courier New', monospace;
         }
         .info-box {
-            background: #E3F2FD;
-            border-left: 4px solid #2196F3;
-            padding: 12px;
-            margin-bottom: 16px;
-            border-radius: 4px;
+            background: rgba(74, 144, 226, 0.1);
+            border-left: 4px solid #4A90E2;
+            padding: 16px;
+            margin-bottom: 20px;
+            border-radius: 6px;
+            color: #e0e0e0;
+        }
+        .info-box strong {
+            color: #4A90E2;
         }
         .warning-box {
-            background: #FFF4E5;
+            background: rgba(255, 152, 0, 0.1);
             border-left: 4px solid #FF9800;
-            padding: 12px;
-            margin-bottom: 16px;
-            border-radius: 4px;
+            padding: 16px;
+            margin-bottom: 20px;
+            border-radius: 6px;
+            color: #e0e0e0;
+        }
+        .warning-box strong {
+            color: #FF9800;
         }
         .checkbox-group {
             display: flex;
             align-items: center;
-            gap: 8px;
-            margin-top: 12px;
+            gap: 10px;
+            margin-top: 16px;
         }
         .checkbox-group input[type="checkbox"] {
             width: auto;
             margin: 0;
+            accent-color: #4A90E2;
+        }
+        .checkbox-group label {
+            margin: 0;
+            cursor: pointer;
         }
         .widget-controls {
-            margin-bottom: 16px;
+            margin-bottom: 20px;
+        }
+        .stats-badge {
+            display: inline-block;
+            background: rgba(74, 144, 226, 0.2);
+            color: #4A90E2;
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 600;
+            margin-left: 12px;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>🎓 BRAVE Counters</h1>
+    <div class="header">
+        <img src="https://cdn.prod.website-files.com/63fca02de79380e5c3306a3f/63fcc9cffd37e885e6b9c275_brave-logo-p-500.png" alt="BRAVE" class="logo">
+        <h1>Counters API</h1>
         <p class="subtitle">Panel zarządzania licznikami kursów i webinarów</p>
+    </div>
 
+    <div class="container">
         <div class="section">
             <h2>📜 Instalacja w Webflow</h2>
             <div class="info-box">
@@ -526,16 +614,14 @@ app.get('/admin', (req, res) => {
                 <button class="copy-btn" onclick="copyInstallCode()">📋 Kopiuj</button>
                 <pre id="installCode">&lt;script src="${baseUrl}/counter.js"&gt;&lt;/script&gt;</pre>
             </div>
-            <p class="help-text" style="margin-top: 12px;">
-                ⚠️ To wystarczy zrobić <strong>raz na cały projekt</strong> - potem możesz dodawać dowolną ilość liczników
-            </p>
+            <p class="help-text">⚠️ To wystarczy zrobić <strong>raz na cały projekt</strong> - potem możesz dodawać dowolną ilość liczników</p>
         </div>
 
         <div class="section">
-            <button class="btn btn-refresh" onclick="refreshCounters()">
-                🔄 Odśwież liczniki teraz
-            </button>
+            <h2>🔄 Aktualizacja liczników</h2>
+            <button class="btn btn-refresh" onclick="refreshCounters()">Odśwież liczniki teraz</button>
             <span id="refreshStatus"></span>
+            <p class="help-text" style="margin-top: 12px;">💡 Liczniki automatycznie aktualizują się <strong>co godzinę o pełnej godzinie</strong></p>
         </div>
 
         <div class="section">
@@ -561,15 +647,13 @@ app.get('/admin', (req, res) => {
                 
                 <div class="form-group">
                     <label>ID grupy dla URL (automatycznie generowane)</label>
-                    <input type="text" id="groupId" required readonly style="background: #f9f9f9;">
+                    <input type="text" id="groupId" required readonly>
                 </div>
                 
                 <div class="form-group">
                     <label>MailerLite Group ID</label>
                     <input type="text" id="mlGroupId" required placeholder="123456789">
-                    <p class="help-text">
-                        Znajdziesz w URL grupy w MailerLite: /groups/<strong>123456789</strong>
-                    </p>
+                    <p class="help-text">Znajdziesz w URL grupy w MailerLite: /groups/<strong>123456789</strong></p>
                 </div>
                 
                 <button type="submit" class="btn btn-primary" id="submitBtn">Dodaj grupę</button>
@@ -667,7 +751,7 @@ app.get('/admin', (req, res) => {
                 attributes += ' data-animate="false"';
             }
             
-            const embedCode = '&lt;div ' + attributes + '&gt;0&lt;/div&gt;';
+            const embedCode = attributes;
             codeBox.querySelector('pre').textContent = embedCode;
             
             // Krok 2 - zapisz konfigurację
@@ -702,6 +786,7 @@ app.get('/admin', (req, res) => {
                 
                 if (res.ok) {
                     alert('✅ Konfiguracja zapisana!');
+                    document.getElementById('codeStep2-' + groupId).style.display = 'none';
                 }
             } catch (error) {
                 alert('❌ Błąd zapisu: ' + error.message);
@@ -734,7 +819,7 @@ app.get('/admin', (req, res) => {
                     const courseName = counter ? counter.courseName : 'Nieznany';
                     const lastUpdate = counter ? new Date(counter.lastUpdate).toLocaleString('pl-PL') : 'Nigdy';
                     
-                    return '<li class="group-item"><div class="group-header" onclick="toggleWidget(\\'' + group.id + '\\')"><div class="group-info"><div class="group-name"><span class="course-badge">' + courseName + '</span>' + group.groupName + '</div><div class="group-details">ID: <code>' + group.id + '</code> | ML Group: <code>' + group.groupId + '</code> | Ostatnia aktualizacja: ' + lastUpdate + '</div></div><div class="group-count">' + count.toLocaleString('pl-PL') + '</div><div class="group-actions" onclick="event.stopPropagation()"><button class="btn btn-secondary" onclick="toggleWidget(\\'' + group.id + '\\')">🎨 Widżet</button><button class="btn btn-danger" onclick="deleteGroup(\\'' + group.id + '\\')">Usuń</button></div></div><div class="widget-section" id="widget-' + group.id + '"><h3 style="margin-bottom: 16px;">Generator widżetu dla Webflow</h3><div class="info-box"><strong>Krok 1:</strong> Skonfiguruj wygląd licznika poniżej</div><div class="widget-controls"><div class="form-group"><label>Szablon tekstu</label><select id="template-' + group.id + '" onchange="updateWidgetPreview(\\'' + group.id + '\\', ' + count + ')"><option value="enrolled" ' + (widget.template === 'enrolled' ? 'selected' : '') + '>Już X osób zapisanych!</option><option value="waitlist" ' + (widget.template === 'waitlist' ? 'selected' : '') + '>X osób na liście oczekujących!</option><option value="custom" ' + (widget.template === 'custom' ? 'selected' : '') + '>Własny tekst</option></select></div><div class="form-group"><label>Własny tekst (użyj {count} dla liczby)</label><textarea id="customText-' + group.id + '" placeholder="Np: Dołącz do {count} uczestników!" onchange="updateWidgetPreview(\\'' + group.id + '\\', ' + count + ')">' + (widget.customText || '') + '</textarea><p class="help-text">Liczba będzie automatycznie pogrubiona</p></div><div class="checkbox-group"><input type="checkbox" id="animate-' + group.id + '" ' + (widget.animate !== false ? 'checked' : '') + ' onchange="updateWidgetPreview(\\'' + group.id + '\\', ' + count + ')"><label for="animate-' + group.id + '" style="margin: 0;">Animuj licznik</label></div></div><h4 style="margin: 16px 0 8px 0;">Podgląd:</h4><div class="widget-preview" id="preview-' + group.id + '">Ładowanie...</div><div class="warning-box" id="codeStep2-' + group.id + '" style="display:none;"><strong>Krok 2:</strong> Zapisz konfigurację (żeby działała automatycznie po odświeżeniu)<br><button class="btn btn-primary" style="margin-top: 8px;" onclick="saveWidget(\\'' + group.id + '\\')">💾 Zapisz konfigurację</button></div><div class="info-box"><strong>Krok 3:</strong> W Webflow dodaj element (Div/Paragraph) i skopiuj ten kod do <strong>Custom Attributes</strong></div><div class="code-box" id="code-' + group.id + '"><button class="copy-btn" onclick="copyCode(\\'' + group.id + '\\')">📋 Kopiuj</button><pre></pre></div><p class="help-text" style="margin-top: 12px;">💡 Możesz stylować tekst normalnie w Webflow - <strong>liczba będzie pogrubiona</strong></p></div></li>';
+                    return '<li class="group-item"><div class="group-header" onclick="toggleWidget(\\'' + group.id + '\\')"><div class="group-info"><div class="group-name"><span class="course-badge">' + courseName + '</span>' + group.groupName + '</div><div class="group-details">ID: <code>' + group.id + '</code> | ML Group: <code>' + group.groupId + '</code> | Ostatnia aktualizacja: ' + lastUpdate + '</div></div><div class="group-count">' + count.toLocaleString('pl-PL') + '</div><div class="group-actions" onclick="event.stopPropagation()"><button class="btn btn-secondary" onclick="toggleWidget(\\'' + group.id + '\\')">🎨 Widżet</button><button class="btn btn-danger" onclick="deleteGroup(\\'' + group.id + '\\')">Usuń</button></div></div><div class="widget-section" id="widget-' + group.id + '"><h3 style="margin-bottom: 20px;">Generator widżetu dla Webflow</h3><div class="info-box"><strong>Krok 1:</strong> Skonfiguruj wygląd licznika poniżej</div><div class="widget-controls"><div class="form-group"><label>Szablon tekstu</label><select id="template-' + group.id + '" onchange="updateWidgetPreview(\\'' + group.id + '\\', ' + count + ')"><option value="enrolled" ' + (widget.template === 'enrolled' ? 'selected' : '') + '>Już X osób zapisanych!</option><option value="waitlist" ' + (widget.template === 'waitlist' ? 'selected' : '') + '>X osób na liście oczekujących!</option><option value="custom" ' + (widget.template === 'custom' ? 'selected' : '') + '>Własny tekst</option></select></div><div class="form-group"><label>Własny tekst (użyj {count} dla liczby)</label><textarea id="customText-' + group.id + '" placeholder="Np: Dołącz do {count} uczestników!" onchange="updateWidgetPreview(\\'' + group.id + '\\', ' + count + ')">' + (widget.customText || '') + '</textarea><p class="help-text">Liczba będzie automatycznie pogrubiona</p></div><div class="checkbox-group"><input type="checkbox" id="animate-' + group.id + '" ' + (widget.animate !== false ? 'checked' : '') + ' onchange="updateWidgetPreview(\\'' + group.id + '\\', ' + count + ')"><label for="animate-' + group.id + '">Animuj licznik</label></div></div><h4 style="margin: 20px 0 12px 0;">Podgląd:</h4><div class="widget-preview" id="preview-' + group.id + '">Ładowanie...</div><div class="warning-box" id="codeStep2-' + group.id + '" style="display:none;"><strong>Krok 2:</strong> Zapisz konfigurację (żeby działała automatycznie po odświeżeniu)<br><button class="btn btn-primary" style="margin-top: 12px;" onclick="saveWidget(\\'' + group.id + '\\')">💾 Zapisz konfigurację</button></div><div class="info-box"><strong>Krok 3:</strong> W Webflow dodaj element (Div/Paragraph), kliknij Settings (⚙️), przewiń do <strong>Custom Attributes</strong> i dla każdego atrybutu z kodu poniżej dodaj osobny wiersz</div><div class="code-box" id="code-' + group.id + '"><button class="copy-btn" onclick="copyCode(\\'' + group.id + '\\')">📋 Kopiuj</button><pre></pre></div><p class="help-text" style="margin-top: 12px;">💡 Możesz stylować tekst normalnie w Webflow - liczba będzie pogrubiona</p></div></li>';
                 }).join('');
                 
                 // Inicjalizuj podglądy
@@ -913,4 +998,5 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Serwer działa na porcie ${PORT}`);
   console.log(`📊 Panel admin: http://localhost:${PORT}/admin`);
+  console.log(`⏰ Auto-refresh: co godzinę o pełnej godzinie`);
 });
